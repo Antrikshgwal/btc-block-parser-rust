@@ -1,23 +1,18 @@
 use std::{
     io::{Error, ErrorKind},
 };
+mod cursor;
+mod iter;
+use crate::cursor::Cursor;
 
-struct Cursor<'a> {
-    buf: & 'a[u8], // Slice with lifetime same as the parent struct
-    pos: usize // Current position in the buffer
-}
-
-struct BlockIter<'a> {
-    cur: Cursor<'a>
-}
-
-impl BlockIter<'_>{
-    fn next(&mut self)-> Option<Result<Blockheader,Error>>{
-         match next_block_header(&mut self.cur){
-            Ok(Some(header)) => Some(Ok(header)),
-            Ok(None) => None, // No more blocks to read Err(e) => Some(Err(e)), // Return the error encountered } } }
-    }
-}
+#[derive(Debug)]
+pub struct Blockheader {
+    version: u32,
+    prev_block: [u8; 32],
+    merkle_root: [u8; 32],
+    time: u32,
+    bits: u32, // target at the time of block mined
+    nonce: u32,
 }
 
 pub struct Block {
@@ -59,7 +54,7 @@ pub fn match_block(cur: &mut Cursor) {
             break;
         }
 
-        let header = parse_header(cur);
+        let header = parse_header(cur).unwrap();
 
         println!("\n=== Block at offset {} ===", cur.pos - 8);
         println!("Block size: {} bytes", size);
@@ -73,6 +68,7 @@ pub fn match_block(cur: &mut Cursor) {
         println!("Nonce: {}", header.nonce);
         //  after header parsing skip to the next block
         cur.pos = payload_start + size ; //  Skip block payload(transactions)
+    }
 }
 
 fn match_magic_bytes(cur: &mut Cursor) -> bool {
@@ -91,16 +87,6 @@ fn read_32_bytes(cur: &mut Cursor) -> [u8; 32] {
         .expect("slice must be 32 bytes");
     cur.pos += 32;
     bytes
-}
-
-#[derive(Debug)]
-pub struct Blockheader {
-    version: u32,
-    prev_block: [u8; 32],
-    merkle_root: [u8; 32],
-    time: u32,
-    bits: u32, // target at the time of block mined
-    nonce: u32,
 }
 
 fn parse_header(cur: &mut Cursor) -> Result<Blockheader, Error>{
@@ -151,7 +137,7 @@ fn print_hash_hex(hash: &[u8; 32]) {
 
 pub fn parse_block(data: &[u8], offset: usize) -> Block {
     let mut cur = Cursor { buf: data, pos: offset };
-    let header = parse_header(&mut cur);
+    let header = parse_header(&mut cur).unwrap();
 
     // Transaction count comes right after header (at offset + 80)
     let tx_count = read_varint(&mut cur);
@@ -183,7 +169,7 @@ let payload_start = cur.pos; // Start of block payload (transactions)
 Ok((block_size, payload_start))
 }
 
-fn next_block_header(cur:&mut Cursor)-> Result<Option<Blockheader>,Error>{
+pub fn next_block_header(cur:&mut Cursor)-> Result<Option<Blockheader>,Error>{
     let (size, payload_start) = read_block_framing(cur)?;
     if payload_start + size > cur.buf.len(){
         return Ok(None);

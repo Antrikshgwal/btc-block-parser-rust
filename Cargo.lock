@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "btc-block-parser-rust"
+name = "ratchet"
 version = "0.1.0"
