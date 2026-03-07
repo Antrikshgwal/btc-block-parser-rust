@@ -1,0 +1,90 @@
+{
+  "ok": true,
+  "mode": "transaction",
+  "network": "mainnet",
+  "segwit": true,
+  "txid": "7a8b73031a13c3a0b7531f0b8bf0384b118f558bb119f43aa8302a00d419c71f",
+  "wtxid": "076f7e93e3c30e4e8c6a6a79e1025a0570f992779a6e2de33cc9bcf694c159c6",
+  "version": 2,
+  "locktime": 0,
+  "size_bytes": 276,
+  "weight": 774,
+  "vbytes": 194,
+  "total_input_sats": 24000,
+  "total_output_sats": 22000,
+  "fee_sats": 2000,
+  "fee_rate_sat_vb": 10.309278350515465,
+  "rbf_signaling": true,
+  "locktime_type": "none",
+  "locktime_value": 0,
+  "segwit_savings": {
+    "witness_bytes": 107,
+    "non_witness_bytes": 167,
+    "total_bytes": 276,
+    "weight_actual": 774,
+    "weight_if_legacy": 1096,
+    "savings_pct": 29.38
+  },
+  "vin": [
+    {
+      "txid": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "vout": 0,
+      "sequence": 4294967294,
+      "script_sig_hex": "",
+      "script_asm": "",
+      "witness": [
+        "eed60c73dec1a4307bb6ade00521a58737c9e184e5f42329a9d82f63456c886ade14624e2f582c43767fffc7d06a49772d53847b711e86cb86cb46d018d9363b01f417e074a554",
+        "688bc8d5d9d8ab2ef6065ad8285a8faf92ca89371c9eb7478ec091bb36914b9044"
+      ],
+      "script_type": "p2wpkh",
+      "address": "bc1qz52329g4z52329g4z52329g4z52329g4xngf6g",
+      "prevout": {
+        "value_sats": 15000,
+        "script_pubkey_hex": "00141515151515151515151515151515151515151515"
+      },
+      "relative_timelock": {
+        "enabled": false
+      }
+    },
+    {
+      "txid": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "vout": 2,
+      "sequence": 4294967293,
+      "script_sig_hex": "",
+      "script_asm": "",
+      "witness": [],
+      "script_type": "p2pkh",
+      "address": "131nKoVLBc2BXUeKQKhnimyrt9DD2XFAnj",
+      "prevout": {
+        "value_sats": 9000,
+        "script_pubkey_hex": "76a914161616161616161616161616161616161616161688ac"
+      },
+      "relative_timelock": {
+        "enabled": false
+      }
+    }
+  ],
+  "vout": [
+    {
+      "n": 0,
+      "value_sats": 10000,
+      "script_pubkey_hex": "00141313131313131313131313131313131313131313",
+      "script_asm": "OP_0 OP_PUSHBYTES_20 1313131313131313131313131313131313131313",
+      "script_type": "p2wpkh",
+      "address": "bc1qzvf3xycnzvf3xycnzvf3xycnzvf3xycn8nwdh4"
+    },
+    {
+      "n": 1,
+      "value_sats": 12000,
+      "script_pubkey_hex": "51201414141414141414141414141414141414141414141414141414141414141414",
+      "script_asm": "OP_1 OP_PUSHBYTES_32 1414141414141414141414141414141414141414141414141414141414141414",
+      "script_type": "p2tr",
+      "address": "bc1pzs2pg9q5zs2pg9q5zs2pg9q5zs2pg9q5zs2pg9q5zs2pg9q5zs2qrauh7c"
+    }
+  ],
+  "warnings": [
+    {
+      "code": "RBF_SIGNALING"
+    }
+  ]
+}
