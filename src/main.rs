@@ -1,14 +1,8 @@
-use ratchet::count_blocks;
-use std::{env, fs};
-
+use btc_block_parser_rust::{emit_error, run_cli};
 
 fn main() {
-    // We will take the command line arguments and store them in a vector
-    let cmds: Vec<String> = env::args().collect();
-    if cmds.len() < 2 {
-        print!("Please provide a file path as an argument.");
-        return;
+    if let Err(err) = run_cli() {
+        emit_error(&err);
+        std::process::exit(1);
     }
-    let file_path = cmds.get(1).expect("Error reading files");
-    let content = fs::read(file_path).expect("Not UTF-8");
 }

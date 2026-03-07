@@ -1,214 +1,169 @@
+mod base128;
+mod block;
+mod merkle;
+mod transactions;
+mod undo;
+mod xor;
+use clap::Parser;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
-    io::{Error, ErrorKind},
+    fs,
+    path::{Path, PathBuf},
 };
-mod cursor;
-mod iter;
-use crate::cursor::Cursor;
+use thiserror::Error;
 
-#[derive(Debug)]
-pub struct Blockheader {
-    version: u32,
-    prev_block: [u8; 32],
-    merkle_root: [u8; 32],
-    time: u32,
-    bits: u32, // target at the time of block mined
-    nonce: u32,
-}
+use bitcoin::consensus::encode;
+use block::analyze_blocks;
+use transactions::{analyze_transaction, decode_transaction};
 
-pub struct Block {
-    pub header: Blockheader,
-    pub tx_count: u64,
-    pub txns: Vec<Transaction>,
-}
+pub fn run_cli() -> Result<(), CliError> {
+    let args = CliArgs::parse();
+    let mode = Mode::try_from(args)?;
 
-pub struct Transaction {
-    pub version: u32,
-    pub data: Vec<u8>,
-}
-
-/*
-* Reads the first 4 bytes from the given offset and interprets them as a little-endian u32. Returns an *error if there isn't enough data.
-*/
-fn read_u32_le(cur: &mut Cursor) -> Result<u32, Error> {
-    let bytes: [u8; 4] = cur.buf
-        .get(cur.pos..cur.pos + 4)
-        .ok_or_else(|| Error::new(ErrorKind::UnexpectedEof, "Not enough data"))?
-        .try_into()
-        .unwrap();
-    cur.pos += 4; // Move the cursor forward by 4 bytes
-    Ok(u32::from_le_bytes(bytes))
-}
-
-pub fn match_block(cur: &mut Cursor) {
-    let len = cur.buf.len();
-    while cur.pos + 8 <= len {
-        if !match_magic_bytes(cur) {
-            println!("Magic bytes not matched!");
-            break;
-        }
-
-        let size = read_u32_le(cur).unwrap() as usize;
-        let payload_start = cur.pos;  // transactions
-        if cur.pos + size > len {
-            println!("Incomplete block data!");
-            break;
-        }
-
-        let header = parse_header(cur).unwrap();
-
-        println!("\n=== Block at offset {} ===", cur.pos - 8);
-        println!("Block size: {} bytes", size);
-        println!("Version: {}", header.version);
-        print!("Previous block: ");
-        print_hash_hex(&header.prev_block);
-        print!("Merkle root: ");
-        print_hash_hex(&header.merkle_root);
-        println!("Timestamp: {}", header.time);
-        println!("Bits: 0x{:08x}", header.bits);
-        println!("Nonce: {}", header.nonce);
-        //  after header parsing skip to the next block
-        cur.pos = payload_start + size ; //  Skip block payload(transactions)
+    match mode {
+        Mode::Fixture { fixture } => handle_fixture_mode(fixture),
+        Mode::Block { blk, rev, xor } => handle_block_mode(blk, rev, xor),
     }
 }
 
-fn match_magic_bytes(cur: &mut Cursor) -> bool {
-    let magic: [u8; 4] = [0xf9, 0xbe, 0xb4, 0xd9];
-    let magic_array = &cur.buf[cur.pos..cur.pos + 4];
-    cur.pos += 4;
-    if magic_array != magic {
-        return false;
-    }
-    true
-}
-
-fn read_32_bytes(cur: &mut Cursor) -> [u8; 32] {
-    let bytes = cur.buf[cur.pos..cur.pos + 32]
-        .try_into()
-        .expect("slice must be 32 bytes");
-    cur.pos += 32;
-    bytes
-}
-
-fn parse_header(cur: &mut Cursor) -> Result<Blockheader, Error>{
-    let header = Blockheader {
-        version: read_u32_le(cur).unwrap(),
-        prev_block: read_32_bytes(cur),
-        merkle_root: read_32_bytes(cur),
-        time: read_u32_le(cur).unwrap(),
-        bits: read_u32_le(cur).unwrap(),
-        nonce: read_u32_le(cur).unwrap(),
-    };
-    Ok(header)
-}
-
-pub fn read_varint(cur: &mut Cursor) -> u64 {
-    let first = &cur.buf[cur.pos];
-    match first {
-        0x00..=0xfc => {
-            cur.pos += 1; // Move the cursor forward by 1 byte
-            *first as u64
-        },
-        0xfd => {
-            let byte: [u8; 2] = cur.buf[cur.pos + 1..cur.pos + 3].try_into().unwrap();
-            let value = u16::from_le_bytes(byte);
-            cur.pos += 3;
-            value as u64
+pub fn emit_error(err: &CliError) {
+    let payload = json!({
+        "ok": false,
+        "error": {
+            "code": err.code(),
+            "message": err.to_string(),
         }
-        0xfe => {
-            let bytes: [u8; 4] = cur.buf[cur.pos + 1..cur.pos + 5].try_into().unwrap();
-            let value = u32::from_le_bytes(bytes);
-            cur.pos += 5;
-            value as u64
-        }
-        0xff => {
-            let bytes: [u8; 8] = cur.buf[cur.pos + 1..cur.pos + 9].try_into().unwrap();
-            let value = u64::from_le_bytes(bytes);
-            cur.pos += 9;
-            value as u64
-        }
-    }
-}
-fn print_hash_hex(hash: &[u8; 32]) {
-    for byte in hash.iter().rev() {
-        print!("{:02x}", byte);
-    }
-    println!();
+    });
+
+    println!("{}", payload);
 }
 
-pub fn parse_block(data: &[u8], offset: usize) -> Block {
-    let mut cur = Cursor { buf: data, pos: offset };
-    let header = parse_header(&mut cur).unwrap();
+fn handle_fixture_mode(fixture_path: PathBuf) -> Result<(), CliError> {
+    let fixture = Fixture::from_file(&fixture_path)?;
+    let tx = decode_transaction(&fixture.raw_tx)?;
+    let report = analyze_transaction(&fixture, &tx)?;
+    let txid = tx.compute_txid().to_string();
 
-    // Transaction count comes right after header (at offset + 80)
-    let tx_count = read_varint(&mut cur);
+    write_report_to_out(&txid, &report)?;
 
-    // For now, just skip transaction parsing
-    let txns = Vec::new();
+    let pretty = serde_json::to_string_pretty(&report)?;
+    println!("{}", pretty);
 
+    Ok(())
+}
+
+fn handle_block_mode(blk: PathBuf, rev: PathBuf, xor: PathBuf) -> Result<(), CliError> {
+    analyze_blocks(&blk, &rev, &xor)
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "chain-lens-cli",
+    about = "Bitcoin transaction and block analyzer"
+)]
+struct CliArgs {
+    #[arg(long = "block", value_names = ["BLK", "REV", "XOR"], num_args = 3)]
+    block_files: Option<Vec<PathBuf>>,
+
+    #[arg(value_name = "FIXTURE", required = false)]
+    fixture: Option<PathBuf>,
+}
+
+enum Mode {
+    Fixture {
+        fixture: PathBuf,
+    },
     Block {
-        header,
-        tx_count,
-        txns,
+        blk: PathBuf,
+        rev: PathBuf,
+        xor: PathBuf,
+    },
+}
+
+impl TryFrom<CliArgs> for Mode {
+    type Error = CliError;
+
+    fn try_from(args: CliArgs) -> Result<Self, Self::Error> {
+        match (args.block_files, args.fixture) {
+            (Some(files), None) => {
+                let mut iter = files.into_iter();
+                let blk = iter.next().expect("clap enforces num_args");
+                let rev = iter.next().expect("clap enforces num_args");
+                let xor = iter.next().expect("clap enforces num_args");
+                Ok(Mode::Block { blk, rev, xor })
+            }
+            (None, Some(fixture)) => Ok(Mode::Fixture { fixture }),
+            (Some(_), Some(_)) => Err(CliError::InvalidArgs(
+                "Cannot combine --block with a fixture path".into(),
+            )),
+            (None, None) => Err(CliError::InvalidArgs(
+                "Fixture path missing; provide <fixture.json> or --block <blk> <rev> <xor>".into(),
+            )),
+        }
     }
 }
 
-fn read_block_framing(cur: &mut Cursor)-> Result<(usize, usize),Error> {
-let len = cur.buf.len();
-
-if cur.pos + 8 > len {
-    return Err(Error::new(ErrorKind::UnexpectedEof, "Not enough bytes"));
+#[derive(Debug, Error)]
+pub enum CliError {
+    #[error("{0}")]
+    InvalidArgs(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("JSON error: {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("Invalid hex: {0}")]
+    InvalidHex(String),
+    #[error("Transaction decode error: {0}")]
+    TxDecode(#[from] encode::Error),
+    #[error("Invalid transaction: {0}")]
+    InvalidTx(String),
+    #[error("Not implemented: {0}")]
+    NotImplemented(&'static str),
 }
 
-// Check magic bytes
-if !match_magic_bytes(cur) {
-    return Err(Error::new(ErrorKind::InvalidData, "Invalid magic bytes"))
-}
-
-let block_size = read_u32_le(cur)? as usize;
-let payload_start = cur.pos; // Start of block payload (transactions)
-Ok((block_size, payload_start))
-}
-
-pub fn next_block_header(cur:&mut Cursor)-> Result<Option<Blockheader>,Error>{
-    let (size, payload_start) = read_block_framing(cur)?;
-    if payload_start + size > cur.buf.len(){
-        return Ok(None);
+impl CliError {
+    fn code(&self) -> &'static str {
+        match self {
+            CliError::InvalidArgs(_) => "INVALID_ARGS",
+            CliError::Io(_) => "IO_ERROR",
+            CliError::Serde(_) => "SERDE_ERROR",
+            CliError::InvalidHex(_) => "INVALID_HEX",
+            CliError::TxDecode(_) => "TX_DECODE_ERROR",
+            CliError::InvalidTx(_) => "INVALID_TX",
+            CliError::NotImplemented(_) => "NOT_IMPLEMENTED",
+        }
     }
-    let header = parse_header(cur)?;
-    // Move cursor to the end of the block payload
-    cur.pos = payload_start + size;
-Ok(Some(header))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Fixture {
+    pub network: String,
+    pub raw_tx: String,
+    pub prevouts: Vec<Prevout>,
+}
 
-
-pub fn count_blocks(cur: &mut Cursor) -> Result<u32, Error> {
-    let mut offset = 0;
-    let magic_bytes: [u8; 4] = [0xf9, 0xbe, 0xb4, 0xd9];
-    let mut blocks = 0;
-
-    while offset + 8 <= cur.buf.len() {
-        if &cur.buf[offset..offset + 4] != magic_bytes {
-            return Err(Error::new(ErrorKind::InvalidData, "Invalid magic bytes"));
-        }
-        // skip magic bytes
-        offset += 4;
-        if offset + 4 > cur.buf.len() {
-            break;
-        }
-        let block_size = u32::from_le_bytes([
-            cur.buf[offset],
-            cur.buf[offset + 1],
-            cur.buf[offset + 2],
-            cur.buf[offset + 3],
-        ]) as usize;
-        offset += 4;
-
-        if offset+ block_size > cur.buf.len(){
-            break;
-        }
-        offset += block_size;
-        blocks += 1
+impl Fixture {
+    pub fn from_file(path: &Path) -> Result<Self, CliError> {
+        let raw = fs::read_to_string(path)?;
+        let fixture: Fixture = serde_json::from_str(&raw)?;
+        Ok(fixture)
     }
-    Ok(blocks)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Prevout {
+    pub txid: String,
+    pub vout: u32,
+    pub value_sats: u64,
+    pub script_pubkey_hex: String,
+}
+
+pub fn write_report_to_out<T: Serialize>(file_stem: &str, value: &T) -> Result<(), CliError> {
+    let out_dir = PathBuf::from("out");
+    fs::create_dir_all(&out_dir)?;
+    let out_path = out_dir.join(format!("{}.json", file_stem));
+    let serialized = serde_json::to_string_pretty(value)?;
+    fs::write(out_path, serialized)?;
+    Ok(())
 }
